@@ -1,0 +1,4 @@
+-r requirements.txt
+
+mypy>=0.971
+coverage>=6.5.0
