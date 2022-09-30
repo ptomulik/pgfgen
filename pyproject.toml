@@ -36,6 +36,7 @@ dev = [
   "coverage>=6.5.0",
   "pylint>=2.15.3",
   "black>=22.8.0",
+  "bumpver>=2022.1118",
 ]
 
 [project.urls]
@@ -70,11 +71,6 @@ show_column_numbers = true
 pretty = true
 strict = true
 warn_unreachable = true
-## warn_redundant_casts = true # enabled by strict
-## warn_unused_ignores = true # enabled by strict
-## warn_return_any = true # enabled by strict
-## warn_unused_configs = true # enabled by strict
-## warn_unused_ignores = true # enabled by strict
 
 [[tool.mypy.overrides]]
 module = "svgelements.*"
@@ -697,3 +693,15 @@ min-public-methods = 2
 # Exceptions that will emit a warning when being caught. Defaults to
 # "Exception".
 #overgeneral-exceptions = ["Exception"]
+
+[tool.bumpver]
+current_version = "0.1.0"
+version_pattern = "MAJOR.MINOR.RELEASE"
+commit_message = "Bump version {old_verion} -> {new_version}"
+commit = true
+tag = true
+push = false
+
+[tool.bumpver.file_patterns]
+"pyproject.toml" = ['current_version = "{version}"', 'version = "{version}"']
+"pgfgen/__init__.py" = ["{version}"]
