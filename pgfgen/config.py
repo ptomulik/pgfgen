@@ -1,36 +1,33 @@
 from __future__ import annotations
 
-from typing import \
-        Any, \
-        BinaryIO, \
-        Optional, \
-        Callable, \
-        Iterable, \
-        Iterator, \
-        TypedDict, \
-        TypeGuard
+from typing import Any
+from typing import Optional
+from typing import Iterable
+from typing import Iterator
+from typing import TypeGuard
 
 import abc
 import contextlib
 import tomli
 
-SearchPath = list[str]
+from .types import ValueGuard
+from .types import PGFGenOptions
 
-# typing only
-ValueGuard = Callable[[Any], bool]
-
-class SVG2PGFOptions(TypedDict, total=False):
-    template_path: SearchPath
 
 class Guards:
+    """Common type-guard functions."""
+
     @staticmethod
     def is_str_list(value: Any) -> TypeGuard[list[str]]:
         if not isinstance(value, list):
             return False
         return all([isinstance(v, str) for v in value])
 
+
 class OptionsValidator:
-    def __init__(self, context: str, log: Optional[list[str]]=None):
+    """A base class for concrete validators."""
+
+    def __init__(self, context: str, log: Optional[list[str]] = None):
         self.context = context
         if log is None:
             log = []
@@ -63,11 +60,11 @@ class OptionsValidator:
             self.context = previous
 
     def validate_optional_key(
-            self,
-            key: str,
-            container: dict[Any, Any],
-            guard: ValueGuard,
-            message: str
+        self,
+        key: str,
+        container: dict[Any, Any],
+        guard: ValueGuard,
+        message: str,
     ) -> bool:
         try:
             value = container[key]
@@ -80,11 +77,7 @@ class OptionsValidator:
         return True
 
     def validate_required_key(
-            self,
-            key: str,
-            container: dict[Any, Any],
-            guard: ValueGuard,
-            message: str
+        self, key: str, container: dict[Any, Any], guard: ValueGuard, message: str
     ) -> bool:
         with self.nested_key(key):
             try:
@@ -98,11 +91,7 @@ class OptionsValidator:
         return True
 
     def validate_list_item(
-            self,
-            offset: int,
-            value: Any,
-            guard: ValueGuard,
-            message: str
+        self, offset: int, value: Any, guard: ValueGuard, message: str
     ) -> bool:
         with self.nested_offset(offset):
             if not guard(value):
@@ -111,10 +100,7 @@ class OptionsValidator:
         return True
 
     def validate_list_items(
-            self,
-            items: Iterable[Any],
-            guard: ValueGuard,
-            message: str
+        self, items: Iterable[Any], guard: ValueGuard, message: str
     ) -> bool:
         result = True
         i = 0
@@ -133,19 +119,23 @@ class OptionsValidator:
         for key in options.keys():
             if key not in self.supported_keys:
                 with self.nested_key(key):
-                    self.warning('is not supported')
+                    self.warning("is not supported")
                 result = False
         return result
 
 
-class SVG2PGFOptionsValidator(OptionsValidator):
-    def validate_options(self, options: Any) -> TypeGuard[SVG2PGFOptions]:
+class PGFGenOptionsValidator(OptionsValidator):
+    """Validator for predefined pgfgen options."""
+
+    def validate_options(self, options: Any) -> TypeGuard[PGFGenOptions]:
         if not isinstance(options, dict):
-            self.error('is not a dictionary')
+            self.error("is not a dictionary")
             return False
 
         result = True
-        if not self.validate_template_path(options):
+        if not self.validate_search_path(options, "svg_path"):
+            result = False
+        if not self.validate_search_path(options, "template_path"):
             result = False
 
         # only for warnings, result is unaltered
@@ -153,17 +143,17 @@ class SVG2PGFOptionsValidator(OptionsValidator):
 
         return result
 
-    def validate_template_path(self, options: dict[Any, Any]) -> bool:
+    def validate_search_path(self, options: dict[Any, Any], key: str) -> bool:
         return self.validate_optional_key(
-            'template_path',
+            key,
             options,
             Guards.is_str_list,
-            'is not a valid list of strings'
+            "is not a valid list of strings",
         )
 
     @property
     def supported_keys(self) -> list[str]:
-        return [ 'template_path' ]
+        return ["svg_path", "template_path"]
 
 
 class ConfigLoader(abc.ABC):
@@ -173,28 +163,31 @@ class ConfigLoader(abc.ABC):
         self.log = log
         self.has_errors = False
 
-    def try_load_file(self, file: str) -> Optional[SVG2PGFOptions]:
+    def try_load_file(self, file: str) -> Optional[PGFGenOptions]:
         try:
             return self.load_file(file)
         except FileNotFoundError:
             return None
 
-    def load_file(self, file: str) -> Optional[SVG2PGFOptions]:
-        with open(file, 'rt', encoding='utf-8') as fp:
+    def load_file(self, file: str) -> Optional[PGFGenOptions]:
+        with open(file, "rt", encoding="utf-8") as fp:
             return self.load_string(fp.read(), file)
 
     @abc.abstractmethod
-    def load_string(self, string: str, file: Optional[str] = None) -> Optional[SVG2PGFOptions]: # pragma: no cover
-        pass
+    def load_string(
+        self, string: str, file: Optional[str] = None
+    ) -> Optional[PGFGenOptions]:
+        pass  # pragma: no cover
 
 
 class TomlConfigLoader(ConfigLoader):
-    def __init__(self, context: str = '', log: Optional[list[str]] = None):
+    def __init__(self, context: str = "", log: Optional[list[str]] = None):
         self.context = context
         super().__init__(log)
 
-
-    def load_string(self, string: str, file: Optional[str] = None) -> Optional[SVG2PGFOptions]:
+    def load_string(
+        self, string: str, file: Optional[str] = None
+    ) -> Optional[PGFGenOptions]:
         self.has_errors = False
         try:
             data = tomli.loads(string)
@@ -204,11 +197,12 @@ class TomlConfigLoader(ConfigLoader):
                 self.log.append(f"error: {str(e)}")
             else:
                 self.log.append(f"error: {file}: {str(e)}")
+            self.has_errors = True
             return None
 
         conf = data
         if self.context:
-            for key in self.context.split(r'.'):
+            for key in self.context.split(r"."):
                 if not isinstance(conf, dict) or key not in conf:
                     return None
                 conf = conf[key]
@@ -218,7 +212,7 @@ class TomlConfigLoader(ConfigLoader):
         else:
             context = f"{file}: {self.context}"
 
-        validator = SVG2PGFOptionsValidator(context, self.log)
+        validator = PGFGenOptionsValidator(context, self.log)
         if not validator.validate_options(conf):
             self.has_errors = True
             return None

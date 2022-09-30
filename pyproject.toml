@@ -1,7 +1,7 @@
 [project]
-name = "svg2pgf"
+name = "pgfgen"
 version = "0.1.0"
-description = "SVG to PGF converter"
+description = "Template-based PGF generator"
 authors = [
   { name = "Paweł Tomulik", email = "ptomulik@wp.pl" }
 ]
@@ -32,15 +32,18 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "mypy>=0.971",
-  "coverage>=6.5.0"
+  "pyproject-flake8>=5.0.3",
+  "coverage>=6.5.0",
+  "pylint>=2.15.3",
+  "black>=22.8.0",
 ]
 
 [project.urls]
-homepage = "https://github.com/ptomulik/svg2pgf"
-repository = "https://github.com/ptomulik/svg2pgf"
+homepage = "https://github.com/ptomulik/pgfgen"
+repository = "https://github.com/ptomulik/pgfgen"
 
 [project.scripts]
-svg2pgf = "svg2pgf.__main__:main"
+pgfgen = "pgfgen.__main__:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]   # PEP 508 specifications
@@ -53,10 +56,10 @@ max-line-length=100
 universal=1
 
 [tool.poetry]
-include = ["svg2pgf/py.typed"]
+include = ["pgfgen/py.typed"]
 
 [tool.setuptools.package-data]
-svg2pgf = ["py.typed"]
+pgfgen = ["py.typed"]
 
 
 [tool.mypy]
@@ -82,12 +85,6 @@ ignore_missing_imports = true
 profile = "black"
 line_length = 88
 src_paths =  ["svgelements"]
-
-
-[tool.black]
-line-length = 88
-target-version = ['py36']
-include = '\.pyi?$'
 
 
 [tool.flake8]
@@ -333,17 +330,6 @@ max-line-length = 88
 
 # Maximum number of lines in a module.
 max-module-lines = 1000
-
-# List of optional constructs for which whitespace checking is disabled.
-# `dict-separator` is used to allow tabulation in dicts, etc. e.g.
-#   {1  : 1,
-#    222: 2}.
-# `trailing-comma` allows a space between comma and closing bracket: (a, ).
-# `empty-line` allows space-only lines.
-no-space-check = [
-    "trailing-comma",
-    "dict-separator"
-]
 
 # Allow the body of a class to be on the same line as the declaration if body
 # contains single statement.

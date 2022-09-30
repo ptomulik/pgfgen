@@ -1,4 +1,7 @@
 -r requirements.txt
 
 mypy>=0.971
+pyproject-flake8>=5.0.3
 coverage>=6.5.0
+pylint>=2.15.3
+black>=22.8.0
