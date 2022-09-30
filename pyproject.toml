@@ -696,8 +696,8 @@ min-public-methods = 2
 
 [tool.bumpver]
 current_version = "0.1.0"
-version_pattern = "MAJOR.MINOR.RELEASE"
-commit_message = "Bump version {old_verion} -> {new_version}"
+version_pattern = "MAJOR.MINOR.PATCH"
+commit_message = "Bump version {old_version} -> {new_version}"
 commit = true
 tag = true
 push = false
