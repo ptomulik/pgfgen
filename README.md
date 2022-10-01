@@ -1,4 +1,4 @@
-svg2pgf
+pgfgen
 =======
 
-Produces LaTeX/PGF code by combining SVG file with Jinja templates.
+Produces LaTeX/PGF code from Jinja templates and vector graphic files.
