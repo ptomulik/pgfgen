@@ -4,19 +4,21 @@ from __future__ import annotations
 
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
-from jinja2 import Template
 
 from collections import namedtuple
 from argparse import Namespace
 
 from typing import Iterator
 from typing import Optional
+from typing import final
 
-from .svgnodes import SVG2PGFTransform
-from .svgnodes import SVGBboxProvider
-from .svgnodes import SVGElementContainerNode
-from .svgnodes import SVGElementNode
-from .svgnodes import SVGNode
+from .svg.nodes import SVG2PGFTransform
+from .svg.nodes import SVGBboxProvider
+from .svg.nodes import SVGElementContainerNode
+from .svg.nodes import SVGElementNode
+from .svg.nodes import SVGNode
+
+from .svg.generator import GeneratorNodeVisitor as SvgToPgfGenerator
 
 from svgelements import Color
 from svgelements import Matrix
@@ -33,6 +35,8 @@ from .defaults import AUTOESCAPE
 from .defaults import TEMPLATE_PATH
 from .defaults import SVG_PATH
 
+from .exceptions import SvgFileNotFound
+
 from .types import SearchPath
 from .types import PGFGenOptions
 from .types import PGFGenOptionKey
@@ -41,34 +45,35 @@ from .types import SupportsAppend
 from .util import find_in_search_path
 
 
-class Factory:
+@final
+class EnvironmentFactory:
     @staticmethod
     def create(
         arguments: Namespace, options: Optional[PGFGenOptions] = None
-    ) -> Factory:
-        template_path = Factory._compose_search_paths(
+    ) -> EnvironmentFactory:
+        template_path = EnvironmentFactory._compose_search_paths(
             arguments.template_path, options, "template_path", TEMPLATE_PATH
         )
-        svg_path = Factory._compose_search_paths(
+        svg_path = EnvironmentFactory._compose_search_paths(
             arguments.svg_path, options, "svg_path", SVG_PATH
         )
-        return Factory(template_path, svg_path)
+        return EnvironmentFactory(template_path=template_path, svg_path=svg_path)
 
     @staticmethod
     def _compose_search_paths(
-        search_path: Optional[SearchPath],
+        searchpath: Optional[SearchPath],
         options: Optional[PGFGenOptions],
         key: PGFGenOptionKey,
         default: SearchPath,
     ) -> SearchPath:
         if options is not None and key in options:
-            if search_path is None:
-                search_path = options[key]
+            if searchpath is None:
+                searchpath = options[key]
             else:
-                search_path.extend(options[key])
-        if search_path is None:
-            search_path = default
-        return search_path
+                searchpath.extend(options[key])
+        if searchpath is None:
+            searchpath = default
+        return searchpath
 
     def __init__(self, template_path: SearchPath, svg_path: SearchPath):
         self.template_path = template_path
@@ -76,7 +81,7 @@ class Factory:
 
     def get_environment(self) -> Environment:
         variables = {
-            "loadsvg": SVGFileLoader(self.svg_path),
+            "loadsvg": SvgFileLoader(self.svg_path),
             "svgtopgf": SvgToPgf,
         }
         env = Environment(
@@ -94,28 +99,11 @@ class Factory:
         return env
 
 
-class Renderer:
-    @staticmethod
-    def create(
-        arguments: Namespace, options: Optional[PGFGenOptions] = None
-    ) -> Renderer:
-
-        env = Factory.create(arguments, options).get_environment()
-        return Renderer(env.get_template(arguments.template))
-
-    def __init__(self, template: Optional[Template] = None):
-        self.template = template
-
-    def render(self) -> str:
-        variables = dict()
-        return self.template.render(**variables)
-
-
-class SVGFileLoader:
-    def __init__(self, search_path: Optional[SearchPath] = None):
-        if search_path is None:
-            search_path = SVG_PATH
-        self.search_path = search_path
+class SvgFileLoader:
+    def __init__(self, searchpath: Optional[SearchPath] = None):
+        if searchpath is None:
+            searchpath = SVG_PATH
+        self.searchpath = searchpath
 
     def __call__(
         self,
@@ -129,9 +117,9 @@ class SVGFileLoader:
         context: Optional[SupportsAppend] = None,
         parse_display_none: bool = False,
     ) -> SVGNode:
-        file = find_in_search_path(self.search_path, name)
+        file = find_in_search_path(self.searchpath, name)
         if file is None:
-            raise FileNotFoundError(name)
+            raise SvgFileNotFound(name)
         return SVGNode.parse(
             file,
             reify=reify,
@@ -145,21 +133,23 @@ class SVGFileLoader:
         )
 
 
-class NamedFragments:
-    def __init__(self, node: SVGElementNode):
-        self._nodes = {n.id: n for n in _select_named_nodes(node)}
+class SvgNamedFragments:
+    def __init__(self, node: SVGElementNode, indent: str = "  "):
+        self._nodes = {n.id: n for n in _svg_select_named_nodes(node)}
+        self.indent = indent
 
-    def __getitem__(self, key: str) -> Optional[str]:
-        node = self._nodes[key]
-        return "\n".join(node.generate())
+    def __getitem__(self, key: str) -> str:
+        generator = SvgToPgfGenerator(self.indent)
+        self._nodes[key].accept_visitor(generator)
+        return "\n".join(generator.lines)
 
 
-def _select_named_nodes(node: SVGElementNode) -> Iterator[SVGElementNode]:
+def _svg_select_named_nodes(node: SVGElementNode) -> Iterator[SVGElementNode]:
     if node.id is not None:
         yield node
     if isinstance(node, SVGElementContainerNode):
         for child in node.children:
-            for n in _select_named_nodes(child):
+            for n in _svg_select_named_nodes(child):
                 yield n
 
 
@@ -173,22 +163,20 @@ class SvgToPgf:
     def __init__(self, node: SVGElementNode, indent: str = "  "):
         self.node = node
         self.indent = indent
-        self.named_fragments: Optional[NamedFragments] = None
+        self.named_fragments: Optional[SvgNamedFragments] = None
 
     @property
     def code(self) -> str:
         """Whole drawing as LaTeX/PGF code."""
-        lines = self.node.generate(self.indent)
-        string = "\n".join(lines)
-        if string:
-            string += "\n"
-        return string
+        generator = SvgToPgfGenerator(self.indent)
+        self.node.accept_visitor(generator)
+        return "\n".join(generator.lines)
 
     @property
-    def frags(self) -> NamedFragments:
+    def frags(self) -> SvgNamedFragments:
         """Parts of drawing resulted from named fragments fo SVG tree."""
         if self.named_fragments is None:
-            self.named_fragments = NamedFragments(self.node)
+            self.named_fragments = SvgNamedFragments(self.node, self.indent)
         return self.named_fragments
 
     @property

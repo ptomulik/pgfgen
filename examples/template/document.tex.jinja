@@ -1,0 +1,32 @@
+\documentclass{article}
+
+\usepackage[a5paper, landscape]{geometry}
+\usepackage{tikz}
+
+(@ if title @)
+\title{(( title ))}
+(@ endif @)
+
+\author{}
+\date{}
+
+\begin{document}
+  (@ if title -@)
+  \maketitle
+  (@- endif +@)
+  \begin{figure}[htbp]
+    \centering
+    \makeatletter
+    \begin{tikzpicture}
+      \pgfsetxvec{\pgfpoint{1cm}{0cm}}
+      \pgfsetyvec{\pgfpoint{0cm}{1cm}}
+      (@ block figurecontent @)(@ endblock @)
+    \end{tikzpicture}
+    \makeatother
+    (@ if figurecaption -@)
+      \caption{(( figurecaption ))}
+    (@- endif +@)
+  \end{figure}
+\end{document}
+
+% vim: ft=tex:

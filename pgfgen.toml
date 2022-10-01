@@ -1,0 +1,2 @@
+template_path = [".", "examples/template"]
+svg_path = ["examples/svg"]

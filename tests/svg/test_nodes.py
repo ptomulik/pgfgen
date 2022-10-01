@@ -8,10 +8,10 @@ from typing import Optional
 
 from svgelements import SVGElement
 
-from pgfgen.svgnodes import Generator
-from pgfgen.svgnodes import SVGElementChildNode
-from pgfgen.svgnodes import SVGElementContainerNode
-from pgfgen.svgnodes import SVGElementNode
+from pgfgen.svg.nodes import Generator
+from pgfgen.svg.nodes import SVGElementChildNode
+from pgfgen.svg.nodes import SVGElementContainerNode
+from pgfgen.svg.nodes import SVGElementNode
 
 
 class TestGenerator(TestCase):

@@ -14,3 +14,7 @@ class InvalidPath(Exception):
 
     def __str__(self) -> str:
         return str(self.message)
+
+
+class SvgFileNotFound(FileNotFoundError):
+    pass

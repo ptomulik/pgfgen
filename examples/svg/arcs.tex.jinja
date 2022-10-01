@@ -1,0 +1,22 @@
+(@ extends "document.tex.jinja" @)
+
+(@ set pgf = svgtopgf(loadsvg("arcs.svg")) @)
+(@ set title = "pgfgen example: arcs.tex.jinja" @)
+(@ set figurecaption = "Generated from \\texttt{arcs.svg}" @)
+
+(@ block figurecontent @)
+(( pgf.code | indent(6) ))
+      \pgftext[base,at={\pgfpointxy{0.0}{1.5}}, rotate=30]{complete picture}
+      \begin{pgfscope}
+        \pgftransformshift{\pgfpointxy{3.0}{0.0}}
+        (( pgf.frags["arc-filled"] | indent(8) ))
+        \pgftext[base,at={\pgfpointxy{0.0}{1.5}}, rotate=30]{``arc-filled''}
+      \end{pgfscope}
+      \begin{pgfscope}
+        \pgftransformshift{\pgfpointxy{-3.0}{0.0}}
+        (( pgf.frags["arc-stroked"] | indent(8) ))
+        \pgftext[base,at={\pgfpointxy{0.0}{1.5}},rotate=30]{``arc-stroked''}
+      \end{pgfscope}
+(@ endblock @)
+
+% vim: ft=tex:

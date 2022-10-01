@@ -14,6 +14,8 @@ PGFGenOptionKey = Literal[
     "template_path",
 ]
 
+BboxTuple = tuple[float, float, float, float]
+
 
 class PGFGenOptions(TypedDict, total=False):
     svg_path: SearchPath

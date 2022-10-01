@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
-from math import atan2
+
+from math import sqrt
 
 from typing import Dict
-from typing import TextIO
-from typing import Iterable
+from typing import Literal
 from typing import Optional
+from typing import TextIO
 from typing import TypedDict
 from typing import final
 
-from svgelements import Angle
 from svgelements import Arc
 from svgelements import Circle
 from svgelements import Close
@@ -35,40 +35,97 @@ from svgelements import SVG
 from svgelements import SVGElement
 from svgelements import Shape
 from svgelements import SimpleLine
-from svgelements import Transformable
 from svgelements import Use
 
 from svgelements.svgelements import _Polyshape
 
-from .types import SupportsAppend
+from ..types import SupportsAppend
+from ..types import BboxTuple
+
+from .visitor import NodeVisitor
+from .visitor import NodeVisitee
+
+import re
 
 
 # only for typing
-Attributes = Dict[str, str]
-
-# only for typing
-Bbox = tuple[float, float, float, float]
+SVGElementAttributes = Dict[str, str]
 
 # only for typing
 SVGSource = str | TextIO
 
 
-class NotRequiredValues(TypedDict, total=False):
-    attributes: Optional[Attributes]
+NotRequiredSVGElementValues = TypedDict(
+    "NotRequiredSVGElementValues",
+    {
+        "alignment-baseline": Optional[str],
+        "attributes": Optional[SVGElementAttributes],
+        "baseline-shift": Optional[str],
+        "clip-path": Optional[str],
+        "clip-rule": Optional[str],
+        "color": Optional[str],
+        "color-interpolation": Optional[str],
+        "color-interpolation-filters": Optional[str],
+        "color-rendering": Optional[str],
+        "cursor": Optional[str],
+        "direction": Optional[str],
+        "display": Optional[str],
+        "dominant-baseline": Optional[str],
+        "fill": Optional[str],
+        "fill-opacity": Optional[str],
+        "fill-rule": Optional[str],
+        "filter": Optional[str],
+        "flood-color": Optional[str],
+        "flood-opacity": Optional[str],
+        "font-family": Optional[str],
+        "font-size": Optional[str],
+        "font-size-adjust": Optional[str],
+        "font-stretch": Optional[str],
+        "font-style": Optional[str],
+        "font-variant": Optional[str],
+        "font-weight": Optional[str],
+        "glyph-orientation-horizontal": Optional[str],
+        "glyph-orientation-vertical": Optional[str],
+        "image-rendering": Optional[str],
+        "letter-spacing": Optional[str],
+        "lighting-color": Optional[str],
+        "marker-end": Optional[str],
+        "marker-mid": Optional[str],
+        "marker-start": Optional[str],
+        "mask": Optional[str],
+        "opacity": Optional[str],
+        "overflow": Optional[str],
+        "paint-order": Optional[str],
+        "pointer-events": Optional[str],
+        "shape-rendering": Optional[str],
+        "stop-color": Optional[str],
+        "stop-opacity": Optional[str],
+        "stroke": Optional[str],
+        "stroke-dasharray": Optional[str],
+        "stroke-dashoffset": Optional[str],
+        "stroke-linecap": Optional[str],
+        "stroke-linejoin": Optional[str],
+        "stroke-miterlimit": Optional[str],
+        "stroke-opacity": Optional[str],
+        "stroke-width": Optional[str],
+        "text-anchor": Optional[str],
+        "text-decoration": Optional[str],
+        "text-overflow": Optional[str],
+        "text-rendering": Optional[str],
+        "transform": Optional[str],
+        "unicode-bidi": Optional[str],
+        "vector-effect": Optional[str],
+        "visibility": Optional[str],
+        "white-space": Optional[str],
+        "word-spacing": Optional[str],
+        "writing-mode": Optional[str],
+    },
+    total=False,
+)
 
 
-class Values(NotRequiredValues):
+class SVGElementValues(NotRequiredSVGElementValues):
     tag: str
-
-
-class Generator(ABC):
-    @abstractmethod
-    def generate(self, indent: str = "  ") -> list[str]:
-        pass  # pragma: no cover
-
-    @classmethod
-    def indent(cls, lines: Iterable[str], indent: str = "  ") -> list[str]:
-        return list([(indent + s) for s in lines])
 
 
 class SVGElementChildNode(ABC):
@@ -91,20 +148,20 @@ class SVGElementContainerNode(ABC):
         pass  # pragma: no cover
 
 
-class SVGElementNode(Generator, SVGElementChildNode):
+class SVGElementNode(NodeVisitee, SVGElementChildNode):
     @property
     @abstractmethod
     def element(self) -> SVGElement:
         pass  # pragma: no cover
 
     @property
-    def values(self) -> Values:
-        values: Values = self.element.values
+    def values(self) -> SVGElementValues:
+        values: SVGElementValues = self.element.values
         return values
 
     @property
-    def attributes(self) -> Attributes:
-        attributes: Optional[Attributes] = self.values.get("attributes")
+    def attributes(self) -> SVGElementAttributes:
+        attributes: Optional[SVGElementAttributes] = self.values.get("attributes")
         return attributes or dict()
 
     @property
@@ -190,29 +247,25 @@ class SVGElementNode(Generator, SVGElementChildNode):
             "writing-mode",
         ]
 
-    def generate_attribute_list(self) -> list[str]:
-        generated = []
-        for item in self.element_attributes:
-            if isinstance(item, tuple):
-                (key, attr) = item
-            else:
-                key = attr = item
-            val = self.attributes.get(attr)
-            if val is not None:
-                generated.append(f"{key}={repr(val)}")
-        return generated
 
-    def generate_begin_pgfscope(self, indent: str = "  ") -> list[str]:
-        attributes = " ".join(self.generate_attribute_list())
-        if attributes:
-            attributes = " " + attributes
-        lines = [r"\begin{pgfscope} %% <%s%s>" % (self.tag, attributes)]
-        lines.extend(self.indent(SVGElementInfoGenerator(self).generate(), indent))
-        lines.extend(self.indent(DrawingOptionsGenerator(self).generate(), indent))
-        return lines
+@final
+class UnsupportedSVGElementNode(SVGElementNode):
+    def __init__(
+        self, element: SVGElement, parent_element_node: Optional[SVGElementNode] = None
+    ) -> None:
+        self._element = element
+        self.parent_element_node = parent_element_node
 
-    def generate_end_pgfscope(self) -> list[str]:
-        return [r"\end{pgfscope} %% </%s>" % self.tag]
+    @property
+    def element(self) -> SVGElement:
+        return self._element
+
+    @property
+    def parent(self) -> Optional[SVGElementNode]:
+        return self.parent_element_node
+
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_unsupported_svg_element(self)
 
 
 class SVGElementNodeWrapper(SVGElementNode):
@@ -234,12 +287,15 @@ class SVGElementNodeWrapper(SVGElementNode):
         return self.wrapped.root
 
     @property
-    def values(self) -> Values:
+    def values(self) -> SVGElementValues:
         return self.wrapped.values
 
     @property
     def tag(self) -> str:
         return self.wrapped.tag
+
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        self.wrapped.accept_visitor(visitor)
 
 
 @final
@@ -295,15 +351,15 @@ class ShapeNodeFactory:
 
 class SVGBboxProvider:
     @abstractmethod
-    def svg_bbox(self) -> Bbox:
+    def svg_bbox(self) -> BboxTuple:
         pass
 
 
 class SVG2PGFTransform(SVGBboxProvider):
-    def __init__(self):
+    def __init__(self) -> None:
         self._svg2pgf_transform: Optional[Matrix] = None
 
-    def _determine_pgf_bbox(self, bbox: Bbox) -> Bbox:
+    def _determine_pgf_bbox(self, bbox: BboxTuple) -> BboxTuple:
         (xmin, ymin, xmax, ymax) = bbox
         w = xmax - xmin
         h = ymax - ymin
@@ -315,16 +371,16 @@ class SVG2PGFTransform(SVGBboxProvider):
             return (-1.0, -1.0, 1.0, 1.0)
 
     @staticmethod
-    def _bbox_center(bbox: Bbox) -> Point:
+    def _bbox_center(bbox: BboxTuple) -> Point:
         (xmin, ymin, xmax, ymax) = bbox
         return Point((xmin + xmax) / 2.0, (ymin + ymax) / 2.0)
 
     @staticmethod
-    def _bbox_size(bbox: Bbox) -> Point:
+    def _bbox_size(bbox: BboxTuple) -> Point:
         (xmin, ymin, xmax, ymax) = bbox
         return Point(abs(xmax - xmin), abs(ymax - ymin))
 
-    def _determine_pgf_scale(self, bbox: Bbox) -> Point:
+    def _determine_pgf_scale(self, bbox: BboxTuple) -> Point:
         svg = self._bbox_size(bbox)
         pgf = self._bbox_size(self._determine_pgf_bbox(bbox))
         if svg.x == 0.0 and svg.y == 0.0:
@@ -367,7 +423,7 @@ class SVG2PGFTransform(SVGBboxProvider):
         matrix = ~svg2pgf * matrix * svg2pgf
         return matrix
 
-    def svg2pgf_bbox(self, bbox: Bbox) -> Bbox:
+    def svg2pgf_bbox(self, bbox: BboxTuple) -> BboxTuple:
         svg2pgf = self.svg2pgf_transform
         bb = (Point(bbox[0], bbox[1]), Point(bbox[2], bbox[3]))
         bb = (svg2pgf.transform_point(bb[0]), svg2pgf.transform_point(bb[1]))
@@ -378,8 +434,131 @@ class SVG2PGFTransform(SVGBboxProvider):
         return (xmin, ymin, xmax, ymax)
 
 
-class ShapeNode(SVGElementNode, SVG2PGFTransform):
-    def __init__(self):
+class GraphicObjectNode:
+    @property
+    @abstractmethod
+    def graphic_object(self) -> GraphicObject:
+        pass
+
+    @property
+    def fill(self) -> Optional[Color]:
+        return self.graphic_object.fill
+
+    @property
+    def stroke(self) -> Optional[Color]:
+        return self.graphic_object.stroke
+
+    @property
+    def stroke_width(self) -> Optional[float]:
+        width: Optional[float] = self.graphic_object.stroke_width
+        return width
+
+    @property
+    def implicit_stroke_width(self) -> Optional[float]:
+        width: Optional[float] = self.graphic_object.implicit_stroke_width
+        return width
+
+    @property
+    def stroke_dasharray(self) -> Optional[list[float] | Literal["none"]]:
+        # svgelements does not implement `stroke_dasharray' property
+        if not isinstance(self.graphic_object, SVGElement):
+            return None
+        string: Optional[str] = self.graphic_object.values.get("stroke-dasharray")
+        if string is None:
+            return None
+        if string.lower() == "none":
+            return "none"
+        dasharray = [float(x) for x in re.split("(?: *(?:,| ) *)", string)]
+        return list(dasharray)
+
+    @property
+    def stroke_dashoffset(self) -> Optional[float]:
+        # svgelements does not implement `stroke_dashoffset' property
+        if not isinstance(self.graphic_object, SVGElement):
+            return None
+        string: str | None = self.graphic_object.values.get("stroke-dashoffset")
+        if string is None:
+            return None
+        return float(string)
+
+    @property
+    def implicit_stroke_dasharray(self) -> Optional[list[float] | Literal["none"]]:
+        # svgelements does not implement `implicit_stroke_dasharray' property
+        dasharray = self.stroke_dasharray
+        if dasharray is None or isinstance(dasharray, str):
+            return dasharray
+        if isinstance(self.graphic_object, SVGElement):
+            # reified Paths have reset transform, so we obtain it from values
+            # again
+            transform: Optional[str] = self.graphic_object.values.get("transform")
+            if transform is not None:
+                matrix = Matrix(transform)
+                scale = sqrt(abs(matrix.determinant))
+                dasharray = list([scale * x for x in dasharray])
+        return dasharray
+
+    @property
+    def implicit_stroke_dashoffset(self) -> Optional[float]:
+        # svgelements does not implement `implicit_stroke_dashoffset' property
+        dashoffset = self.stroke_dashoffset
+        if dashoffset is None:
+            return None
+        if isinstance(self.graphic_object, SVGElement):
+            # reified Paths have reset transform matrix, so we obtain it from
+            # values again
+            transform: Optional[str] = self.graphic_object.values.get("transform")
+            if transform is not None:
+                matrix = Matrix(transform)
+                scale = sqrt(abs(matrix.determinant))
+                dashoffset = scale * dashoffset
+        return dashoffset
+
+
+class GraphicObjectNodeWrapper(GraphicObjectNode):
+    @property
+    @abstractmethod
+    def wrapped(self) -> GraphicObjectNode:
+        pass
+
+    @property
+    def graphic_object(self) -> GraphicObject:
+        return self.wrapped.graphic_object
+
+    @property
+    def fill(self) -> Optional[Color]:
+        return self.wrapped.fill
+
+    @property
+    def stroke(self) -> Optional[Color]:
+        return self.wrapped.stroke
+
+    @property
+    def stroke_width(self) -> Optional[float]:
+        return self.wrapped.stroke_width
+
+    @property
+    def implicit_stroke_width(self) -> Optional[float]:
+        return self.wrapped.implicit_stroke_width
+
+    @property
+    def stroke_dasharray(self) -> Optional[list[float] | Literal["none"]]:
+        return self.wrapped.stroke_dasharray
+
+    @property
+    def stroke_dashoffset(self) -> Optional[float]:
+        return self.wrapped.stroke_dashoffset
+
+    @property
+    def implicit_stroke_dasharray(self) -> Optional[list[float] | Literal["none"]]:
+        return self.wrapped.implicit_stroke_dasharray
+
+    @property
+    def implicit_stroke_dashoffset(self) -> Optional[float]:
+        return self.wrapped.implicit_stroke_dashoffset
+
+
+class ShapeNode(SVGElementNode, GraphicObjectNode, SVG2PGFTransform):
+    def __init__(self) -> None:
         SVG2PGFTransform.__init__(self)
 
     @property
@@ -388,114 +567,16 @@ class ShapeNode(SVGElementNode, SVG2PGFTransform):
         pass
 
     @property
+    def graphic_object(self) -> GraphicObject:
+        return self.shape
+
+    @property
     def element(self) -> SVGElement:
         return self.shape
 
-    def svg_bbox(self) -> Bbox:
-        bb: Bbox = self.shape.bbox()
+    def svg_bbox(self) -> BboxTuple:
+        bb: BboxTuple = self.shape.bbox()
         return bb
-
-    def generate_pgfusepath(self) -> list[str]:
-        lines = []
-        actions = []
-        if isinstance(self.shape.fill, Color) and self.shape.fill.value:
-            actions.append("fill")
-        if isinstance(self.shape.stroke, Color) and self.shape.stroke.value:
-            actions.append("stroke")
-        if actions:
-            mode = ", ".join(actions)
-            lines.append(r"\pgfusepath{%s}" % mode)
-        return lines
-
-
-@final
-class SVGElementInfoGenerator(SVGElementNodeWrapper):
-    def __init__(self, wrapped_element_node: SVGElementNode):
-        self.wrapped_element_node = wrapped_element_node
-
-    @property
-    def wrapped(self) -> SVGElementNode:
-        return self.wrapped_element_node
-
-    def generate(self, indent: str = "  ") -> list[str]:
-        lines = []
-        if isinstance(self.wrapped, SVGBboxProvider):
-            svg_bb = self.wrapped.svg_bbox()
-            lines.extend(self.generate_svg_bbox(svg_bb))
-            if isinstance(self.root, SVG2PGFTransform):
-                pgf_bb = self.root.svg2pgf_bbox(svg_bb)
-                lines.extend(self.generate_pgf_bbox(pgf_bb))
-        if self.wrapped is self.root and isinstance(self.wrapped, SVG2PGFTransform):
-            svg2pgf = self.wrapped.svg2pgf_transform
-            lines.append(f"% SVG2PGF transform: {repr(svg2pgf)}")
-        if isinstance(self.element, Transformable):
-            svg_transform = self.element.transform
-            if svg_transform is not None:
-                lines.append(f"% SVG transform: {repr(svg_transform)}")
-                if isinstance(self.root, SVG2PGFTransform):
-                    pgf_transform = self.root.svg2pgf_matrix(svg_transform)
-                    lines.append(f"% PGF transform: {repr(pgf_transform)}")
-        return lines
-
-    def generate_svg_bbox(self, bb: Bbox) -> list[str]:
-        return [f"% SVG bounding box: {self.bbox_to_str(bb)}"]
-
-    def generate_pgf_bbox(self, bb: Bbox) -> list[str]:
-        return [f"% PGF bounding box: {self.bbox_to_str(bb)}"]
-
-    def bbox_to_str(self, bb: Bbox) -> str:
-        (xmin, ymin, xmax, ymax) = bb
-        (w, h) = (xmax - xmin, ymax - ymin)
-        return f"{{{xmin}}}{{{ymin}}}{{{xmax}}}{{{ymax}}} % {w} x {h}"
-
-
-@final
-class PGFTransformcmGenerator(Generator):
-    def __init__(self, svg_transform: Matrix, svg2pgf_transform: Matrix):
-        self.svg_transform = svg_transform
-        self.svg2pgf_transform = svg2pgf_transform
-
-    def generate(self, indent: str = "  ") -> list[str]:
-        m = ~self.svg2pgf_transform * self.svg_transform * self.svg2pgf_transform
-        t = r"\pgfpointxy{%r}{%r}" % (m.e, m.f)  # translation
-        return [r"\pgftransformcm{%r}{%r}{%r}{%r}{%s}" % (m.a, m.b, m.c, m.d, t)]
-
-
-@final
-class DrawingOptionsGenerator(SVGElementNodeWrapper):
-    def __init__(self, wrapped_element_node: SVGElementNode):
-        self.wrapped_element_node = wrapped_element_node
-
-    @property
-    def wrapped(self) -> SVGElementNode:
-        return self.wrapped_element_node
-
-    def generate(self, indent: str = "  ") -> list[str]:
-        lines = []
-        if isinstance(self.element, GraphicObject):
-            lines.extend(self.generate_color_options(self.element))
-        return lines
-
-    @classmethod
-    def generate_color_options(cls, element: GraphicObject) -> list[str]:
-        lines = []
-        for option in ("fill", "stroke"):
-            lines.extend(cls.generate_color_option(element, option))
-        return lines
-
-    @classmethod
-    def generate_color_option(cls, element: GraphicObject, option: str) -> list[str]:
-        """The option is either 'fill' or 'stroke'"""
-        lines = []
-        if not hasattr(element, option):
-            return []
-        color = getattr(element, option)
-        if isinstance(color, Color) and color.value is not None:
-            cvar = f"local{option}color"
-            cval = color.hex[1:]  # remove leading '#'
-            lines.append(r"\definecolor{%s}{HTML}{%s}" % (cvar, cval))
-            lines.append(r"\pgfset%scolor{%s}" % (option, cvar))
-        return lines
 
 
 @final
@@ -519,17 +600,8 @@ class PathNode(ShapeNode):
     def parent(self) -> Optional[SVGElementNode]:
         return self.parent_element_node
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        lines = self.generate_begin_pgfscope(indent)
-
-        factory = PathSegmentNodeFactory(self)
-        for segment in self.element:
-            node = factory.create_node(segment)
-            lines.extend(self.indent(node.generate(), indent))
-
-        lines.extend(self.indent(self.generate_pgfusepath(), indent))
-        lines.extend(self.generate_end_pgfscope())
-        return lines
+    def accept_visitor(self, node: NodeVisitor) -> None:
+        node.visit_path(self)
 
 
 @final
@@ -554,7 +626,7 @@ class PathSegmentNodeFactory:
             return UnsupportedPathSegmentNode(segment)
 
 
-class PathSegmentNode(Generator, SVGElementChildNode, SVG2PGFTransform):
+class PathSegmentNode(NodeVisitee, SVGElementChildNode, SVG2PGFTransform):
     def __init__(self, parent_path_node: Optional[PathNode] = None) -> None:
         SVG2PGFTransform.__init__(self)
         self.parent_path_node = parent_path_node
@@ -568,35 +640,31 @@ class PathSegmentNode(Generator, SVGElementChildNode, SVG2PGFTransform):
     def parent(self) -> Optional[PathNode]:
         return self.parent_path_node
 
-    def svg_bbox(self) -> Bbox:
-        bb: Bbox = self.segment.bbox()
+    def svg_bbox(self) -> BboxTuple:
+        bb: BboxTuple = self.segment.bbox()
         return bb
 
 
-@final
-class UnsupportedSVGElementNode(SVGElementNode):
-    def __init__(
-        self, element: SVGElement, parent_element_node: Optional[SVGElementNode] = None
-    ) -> None:
-        self._element = element
-        self.parent_element_node = parent_element_node
+class PathSegmentNodeWrapper(PathSegmentNode):
+    @property
+    @abstractmethod
+    def wrapped(self) -> PathSegmentNode:
+        pass
 
     @property
-    def element(self) -> SVGElement:
-        return self._element
+    def parent(self) -> Optional[PathNode]:
+        return self.wrapped.parent
 
     @property
-    def parent(self) -> Optional[SVGElementNode]:
-        return self.parent_element_node
+    def segment(self) -> PathSegment:
+        return self.wrapped.segment
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        extra = ""
-        if hasattr(self.element, "id"):
-            extra = f" (id={self.element.id})"
-        return [
-            f"% warning: skipping unsupported SVGElement"
-            f"({type(self.element)}) <{self.element.values['tag']}>{extra}"
-        ]
+    @property
+    def svg_bbox(self) -> BboxTuple:
+        return self.wrapped.svg_bbox()
+
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        self.wrapped.accept_visitor(visitor)
 
 
 @final
@@ -616,14 +684,8 @@ class UnsupportedShapeNode(ShapeNode):
     def parent(self) -> Optional[SVGElementNode]:
         return self.parent_element_node
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        extra = ""
-        if hasattr(self.element, "id"):
-            extra = f" (id={self.element.id})"
-        return [
-            f"% warning: skipping unsupported Shape ({type(self.shape)})"
-            f" <{self.element.values['tag']}>{extra}"
-        ]
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_unsupported_shape(self)
 
 
 @final
@@ -638,13 +700,8 @@ class UnsupportedPathSegmentNode(PathSegmentNode):
     def segment(self) -> PathSegment:
         return self.path_segment
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        extra = ""
-        if hasattr(self.segment, "id"):
-            extra = f" (id={self.segment.id})"
-        return [
-            f"% warning: skipping unsupported path segment {type(self.segment)}{extra}"
-        ]
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_unsupported_path_semgment(self)
 
 
 @final
@@ -659,8 +716,8 @@ class CloseNode(PathSegmentNode):
     def segment(self) -> Close:
         return self.close
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        return [r"\pgfpathclose"]
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_close(self)
 
 
 @final
@@ -673,11 +730,8 @@ class MoveNode(PathSegmentNode):
     def segment(self) -> Move:
         return self.move
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        end = self.move.end
-        if isinstance(self.root, SVG2PGFTransform):
-            end = self.root.svg2pgf_point(end)
-        return [r"\pgfpathmoveto{\pgfpointxy{%r}{%r}}" % (end.x, end.y)]
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_move(self)
 
 
 @final
@@ -690,11 +744,8 @@ class LineNode(PathSegmentNode):
     def segment(self) -> Line:
         return self.line
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        end = self.line.end
-        if isinstance(self.root, SVG2PGFTransform):
-            end = self.root.svg2pgf_point(end)
-        return [r"\pgfpathlineto{\pgfpointxy{%r}{%r}}" % (end.x, end.y)]
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_line(self)
 
 
 @final
@@ -709,18 +760,8 @@ class CubicBezierNode(PathSegmentNode):
     def segment(self) -> CubicBezier:
         return self.cubic_bezier
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        c1 = self.cubic_bezier.control1
-        c2 = self.cubic_bezier.control2
-        end = self.segment.end
-        if isinstance(self.root, SVG2PGFTransform):
-            c1 = self.root.svg2pgf_point(c1)
-            c2 = self.root.svg2pgf_point(c2)
-            end = self.root.svg2pgf_point(end)
-        c1_str = r"\pgfpointxy{%r}{%r}" % (c1.x, c1.y)
-        c2_str = r"\pgfpointxy{%r}{%r}" % (c2.x, c2.y)
-        end_str = r"\pgfpointxy{%r}{%r}" % (end.x, end.y)
-        return [r"\pgfpathcurveto{%s}{%s}{%s}" % (c1_str, c2_str, end_str)]
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_cubic_bezier(self)
 
 
 @final
@@ -737,15 +778,8 @@ class QuadraticBezierNode(PathSegmentNode):
     def segment(self) -> QuadraticBezier:
         return self.quadratic_bezier
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        c = self.quadratic_bezier.control
-        end = self.segment.end
-        if isinstance(self.root, SVG2PGFTransform):
-            c = self.root.svg2pgf_point(c)
-            end = self.root.svg2pgf_point(end)
-        c_str = r"\pgfpointxy{%r}{%r}" % (c.x, c.y)
-        end_str = r"\pgfpointxy{%r}{%r}" % (end.x, end.y)
-        return [r"\pgfpathquadraticcurveto{%s}{%s}" % (c_str, end_str)]
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_quadratic_bezier(self)
 
 
 @final
@@ -758,93 +792,8 @@ class ArcNode(PathSegmentNode):
     def segment(self) -> Arc:
         return self.arc
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        if self.arc.start == self.arc.end:
-            # this is equivalent to omitting the segment, so do nothing
-            return []
-        if self.arc.radius.x == 0 or self.arc.radius.y == 0:
-            end = self.arc.end
-            if isinstance(self.root, SVG2PGFTransform):
-                end = self.root.svg2pgf_point(end)
-            return [r"\pgfpathlineto{\pgfpointxy{%r}{%r}}" % (end.x, end.y)]
-
-        if isinstance(self.root, SVG2PGFTransform):
-            arc = self.arc * self.root.svg2pgf_transform
-        else:
-            arc = self.arc
-
-        vrx = arc.prx - arc.center
-        vry = arc.pry - arc.center
-
-        sweep = self._determine_sweep(vrx, vry)
-        (start_angle, end_angle) = self._determine_angles(vrx, vry, arc, sweep)
-
-        vrx_str = r"\pgfpointxy{%r}{%r}" % (vrx.x, vrx.y)
-        vry_str = r"\pgfpointxy{%r}{%r}" % (vry.x, vry.y)
-        return [
-            r"\pgfpatharcaxes{%r}{%r}{%s}{%s}"
-            % (start_angle, end_angle, vrx_str, vry_str)
-        ]
-
-    def _determine_sweep(self, vrx: Point, vry: Point) -> float:
-        # Test whether our SVG axes transformed to PGF space comprise right- or
-        # left-handed pair of vectors. If left-handed,then we have to change
-        # sweep sign.
-        ex = Point(1, 0)
-        ey = Point(0, 1)
-        if isinstance(self.root, SVG2PGFTransform):
-            ex = self.root.svg2pgf_vector(ex)
-            ey = self.root.svg2pgf_vector(ey)
-        ez = ex.x * ey.y - ex.y * ey.x
-        if ez > 0:  # right-handed
-            sweep = self.arc.sweep
-        else:  # left-handed
-            sweep = -self.arc.sweep
-
-        # Check whether the pair (vrx, vry) is right- or left-handed
-        # If left-handed, we have to change sweep again.
-        vrz = vrx.x * vry.y - vrx.y * vry.x
-        if vrz < 0:
-            sweep = -sweep
-
-        return Angle(sweep).as_degrees
-
-    def _determine_angles(
-        self, vrx: Point, vry: Point, arc: Arc, sweep: float
-    ) -> tuple[float, float]:
-        # arc is self.arc in pgf space
-        vs = arc.start - arc.center
-        ve = arc.end - arc.center
-
-        vrx2 = vrx.x * vrx.x + vrx.y * vrx.y
-        vry2 = vry.x * vry.x + vry.y * vry.y
-
-        # projection of vs on vrx and vry (dot products used)
-        vsp = Point(
-            (vs.x * vrx.x + vs.y * vrx.y) / vrx2, (vs.x * vry.x + vs.y * vry.y) / vry2
-        )
-        # projection of ve on vrx and vry (dot products used)
-        vep = Point(
-            (ve.x * vrx.x + ve.y * vrx.y) / vrx2, (ve.x * vry.x + ve.y * vry.y) / vry2
-        )
-
-        # PGF uses different definition of start_angle and end_angle
-        # While svgelements measures angles w.r.t global x-axis,
-        # PGF uses angles measured w.r.t vrx.
-        start_angle = Angle(atan2(vsp.y, vsp.x)).as_positive_degrees
-        end_angle = Angle(atan2(vep.y, vep.x)).as_positive_degrees
-
-        # Sweep is determined by PGF from start and end angle, so we must
-        # set up these two appropriatelly to preserve information about
-        # sweep's sign.
-        if sweep > 0:
-            while end_angle <= start_angle:
-                end_angle += 360
-        elif sweep < 0:
-            while start_angle <= end_angle:
-                start_angle += 360
-
-        return (start_angle, end_angle)
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_arc(self)
 
 
 @final
@@ -868,35 +817,8 @@ class CircleNode(ShapeNode):
     def presentation_attributes(self) -> list[str | tuple[str, str]]:
         return super().presentation_attributes + ["cx", "cy" "r"]
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        c = self.circle.implicit_center
-        vrx = Point(self.circle.implicit_rx, 0)
-        vry = Point(0, self.circle.implicit_ry)
-
-        m = self.element.transform
-
-        vrx = m.transform_vector(vrx)
-        vry = m.transform_vector(vry)
-
-        if isinstance(self.root, SVG2PGFTransform):
-            c = self.root.svg2pgf_point(c)
-            vrx = self.root.svg2pgf_vector(vrx)
-            vry = self.root.svg2pgf_vector(vry)
-
-        c_str = r"\pgfpointxy{%r}{%r}" % (c.x, c.y)
-        vrx_str = r"\pgfpointxy{%r}{%r}" % (vrx.x, vrx.y)
-        vry_str = r"\pgfpointxy{%r}{%r}" % (vry.x, vry.y)
-
-        lines = self.generate_begin_pgfscope(indent)
-        lines.extend(
-            self.indent(
-                [r"\pgfpathellipse{%s}{%s}{%s}" % (c_str, vrx_str, vry_str)], indent
-            )
-        )
-        lines.extend(self.indent(self.generate_pgfusepath(), indent))
-        lines.extend(self.generate_end_pgfscope())
-
-        return lines
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_circle(self)
 
 
 @final
@@ -920,33 +842,8 @@ class EllipseNode(ShapeNode):
     def presentation_attributes(self) -> list[str | tuple[str, str]]:
         return super().presentation_attributes + ["cx", "cy", "rx", "ry"]
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        c = self.ellipse.implicit_center
-        vrx = Point(self.ellipse.implicit_rx, 0)
-        vry = Point(0, self.ellipse.implicit_ry)
-
-        m = self.element.transform
-
-        vrx = m.transform_vector(vrx)
-        vry = m.transform_vector(vry)
-
-        if isinstance(self.root, SVG2PGFTransform):
-            c = self.root.svg2pgf_point(c)
-            vrx = self.root.svg2pgf_vector(vrx)
-            vry = self.root.svg2pgf_vector(vry)
-
-        lines = self.generate_begin_pgfscope(indent)
-        c_str = r"\pgfpointxy{%r}{%r}" % (c.x, c.y)
-        vrx_str = r"\pgfpointxy{%r}{%r}" % (vrx.x, vrx.y)
-        vry_str = r"\pgfpointxy{%r}{%r}" % (vry.x, vry.y)
-        lines.extend(
-            self.indent(
-                [r"\pgfpathellipse{%s}{%s}{%s}" % (c_str, vrx_str, vry_str)], indent
-            )
-        )
-        lines.extend(self.indent(self.generate_pgfusepath(), indent))
-        lines.extend(self.generate_end_pgfscope())
-        return lines
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_ellipse(self)
 
 
 @final
@@ -977,34 +874,8 @@ class RectNode(ShapeNode):
             "ry",
         ]
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        position = Point(self.rect.x, self.rect.y)
-        diagonal = Point(self.rect.width, self.rect.height)
-
-        if isinstance(self.root, SVG2PGFTransform):
-            svg2pgf = self.root.svg2pgf_transform
-            position = self.root.svg2pgf_point(position)
-            diagonal = self.root.svg2pgf_vector(diagonal)
-        else:
-            svg2pgf = Matrix.identity()
-
-        lines = self.generate_begin_pgfscope(indent)
-        lines.extend(
-            self.indent(
-                PGFTransformcmGenerator(self.element.transform, svg2pgf).generate(),
-                indent,
-            )
-        )
-        position_str = r"\pgfpointxy{%r}{%r}" % (position.x, position.y)
-        diagonal_str = r"\pgfpointxy{%r}{%r}" % (diagonal.x, diagonal.y)
-        lines.extend(
-            self.indent(
-                [r"\pgfpathrectangle{%s}{%s}" % (position_str, diagonal_str)], indent
-            )
-        )
-        lines.extend(self.indent(self.generate_pgfusepath(), indent))
-        lines.extend(self.generate_end_pgfscope())
-        return lines
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_rect(self)
 
 
 @final
@@ -1026,29 +897,8 @@ class SimpleLineNode(ShapeNode):
     def parent(self) -> Optional[SVGElementNode]:
         return self.parent_element_node
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        p1 = Point(self.simple_line.implicit_x1, self.simple_line.implicit_y1)
-        p2 = Point(self.simple_line.implicit_x2, self.simple_line.implicit_y2)
-
-        if isinstance(self.root, SVG2PGFTransform):
-            p1 = self.root.svg2pgf_point(p1)
-            p2 = self.root.svg2pgf_point(p2)
-
-        lines = self.generate_begin_pgfscope(indent)
-        p1_str = r"\pgfpointxy{%r}{%r}" % (p1.x, p1.y)
-        p2_str = r"\pgfpointxy{%r}{%r}" % (p2.x, p2.y)
-        lines.extend(
-            self.indent(
-                [
-                    r"\pgfpathmoveto{%s}" % p1_str,
-                    r"\pgfpathlineto{%s}" % p2_str,
-                ],
-                indent,
-            )
-        )
-        lines.extend(self.indent(self.generate_pgfusepath(), indent))
-        lines.extend(self.generate_end_pgfscope())
-        return lines
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_simpleline(self)
 
 
 class _PolyshapeNode(ShapeNode):
@@ -1074,25 +924,6 @@ class _PolyshapeNode(ShapeNode):
     def is_closed(self) -> bool:
         pass
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        first = True
-        lines = self.generate_begin_pgfscope(indent)
-        for point in self.polyshape:
-            if isinstance(self.root, SVG2PGFTransform):
-                point = self.root.svg2pgf_point(point)
-            point_str = r"\pgfpointxy{%r}{%r}" % (point.x, point.y)
-            if first:
-                cmd = r"\pgfpathmoveto{%s}" % point_str
-                first = False
-            else:
-                cmd = r"\pgfpathlineto{%s}" % point_str
-            lines.extend(self.indent([cmd], indent))
-        if self.is_closed:
-            lines.extend(self.indent([r"\pgfpathclose"], indent))
-        lines.extend(self.indent(self.generate_pgfusepath(), indent))
-        lines.extend(self.generate_end_pgfscope())
-        return lines
-
 
 @final
 class PolylineNode(_PolyshapeNode):
@@ -1100,12 +931,18 @@ class PolylineNode(_PolyshapeNode):
     def is_closed(self) -> bool:
         return False
 
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_polyline(self)
+
 
 @final
 class PolygonNode(_PolyshapeNode):
     @property
     def is_closed(self) -> bool:
         return True
+
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_polygon(self)
 
 
 class GroupNode(SVGElementNode, SVGElementContainerNode, SVG2PGFTransform):
@@ -1132,16 +969,12 @@ class GroupNode(SVGElementNode, SVGElementContainerNode, SVG2PGFTransform):
     def children(self) -> list[SVGElementNode]:
         return self.children_element_nodes
 
-    def svg_bbox(self) -> Bbox:
-        bb: Bbox = self.group.bbox()
+    def svg_bbox(self) -> BboxTuple:
+        bb: BboxTuple = self.group.bbox()
         return bb
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        lines = self.generate_begin_pgfscope(indent)
-        for child in self.children_element_nodes:
-            lines.extend(self.indent(child.generate(), indent))
-        lines.extend(self.generate_end_pgfscope())
-        return lines
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_group(self)
 
 
 class UseNode(SVGElementNode, SVGElementContainerNode, SVG2PGFTransform):
@@ -1177,16 +1010,12 @@ class UseNode(SVGElementNode, SVGElementContainerNode, SVG2PGFTransform):
             "y",
         ]
 
-    def svg_bbox(self) -> Bbox:
-        bb: Bbox = self.use.bbox()
+    def svg_bbox(self) -> BboxTuple:
+        bb: BboxTuple = self.use.bbox()
         return bb
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        lines = self.generate_begin_pgfscope(indent)
-        for child in self.children_element_nodes:
-            lines.extend(self.indent(child.generate(), indent))
-        lines.extend(self.generate_end_pgfscope())
-        return lines
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_use(self)
 
 
 class SymbolNode(SVGElementNode):
@@ -1204,24 +1033,8 @@ class SymbolNode(SVGElementNode):
     def parent(self) -> Optional[SVGElementNode]:
         return self.parent_element_node
 
-    def generate(self, indent: str = "  ") -> list[str]:
-        lines = []
-        if not isinstance(self.parent, UseNode):
-            lines.extend(
-                [
-                    "% warning: The following code may be a result of rendering"
-                    " <symbol> declaration.",
-                    "% warning: This is a bug, <symbol>s should only be rendered"
-                    " when <use>d.",
-                    "% warning: This is a missing feature or existing bug in the"
-                    "svgelements library we use.",
-                    "% warning: It results with generating duplicated code or"
-                    "rendering <symbol>s that are not <use>d.",
-                    "% warning: Try to identify what part of the following code"
-                    "should be deleted and do it manually.",
-                ]
-            )
-        return lines
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_symbol(self)
 
 
 @final
@@ -1269,3 +1082,6 @@ class SVGNode(GroupNode):
     @property
     def root(self) -> SVGNode:
         return self
+
+    def accept_visitor(self, visitor: NodeVisitor) -> None:
+        visitor.visit_svg(self)

@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import sys
-from argparse import ArgumentParser
-from .templating import Renderer
-from .types import PGFGenOptions
 from .config import TomlConfigLoader
+from .exceptions import SvgFileNotFound
+from .templating import EnvironmentFactory
+from .templating import SvgFileLoader
+from .types import PGFGenOptions
+from argparse import ArgumentParser
+from jinja2.exceptions import TemplateNotFound
+from jinja2.loaders import FileSystemLoader
 from typing import Optional
 
 
@@ -65,14 +69,32 @@ class App:
         arguments = self.argument_parser.parse_args()
         config = self.try_load_config_files()
 
+        status = 0
+
         if len(self.config_loader.log) > 0:
             sys.stderr.write("\n".join(self.config_loader.log))
             sys.stderr.write("\n")
+            status = 2
 
         if self.config_loader.has_errors:
             return 1
 
-        pgf = Renderer.create(arguments, config).render()
+        env = EnvironmentFactory.create(arguments, config).get_environment()
+        try:
+            pgf = env.get_template(arguments.template).render()
+        except TemplateNotFound as e:
+            sys.stderr.write(f"error: {str(e)}: template not found")
+            if isinstance(env.loader, FileSystemLoader):
+                sys.stderr.write(f" in {repr(env.loader.searchpath)}")
+            sys.stderr.write("\n")
+            return 1
+        except SvgFileNotFound as e:
+            sys.stderr.write(f"error: {str(e)}: file not found")
+            loader = env.globals.get("loadsvg")
+            if isinstance(loader, SvgFileLoader):
+                sys.stderr.write(f" in {loader.searchpath}")
+            sys.stderr.write("\n")
+            return 1
 
         if arguments.output is None:
             sys.stdout.write(f"{pgf}\n")
@@ -80,7 +102,7 @@ class App:
             with open(arguments.output, "w") as output:
                 output.write(f"{pgf}\n")
 
-        return 0
+        return status
 
 
 def main() -> int:
