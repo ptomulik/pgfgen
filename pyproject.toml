@@ -1,6 +1,6 @@
 [project]
 name = "pgfgen"
-version = "0.4.0"
+version = "0.5.0"
 description = "Template-based PGF generator"
 authors = [
   { name = "Paweł Tomulik", email = "ptomulik@wp.pl" }
@@ -697,7 +697,7 @@ min-public-methods = 2
 #overgeneral-exceptions = ["Exception"]
 
 [tool.bumpver]
-current_version = "0.4.0"
+current_version = "0.5.0"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "Bump version {old_version} -> {new_version}"
 commit = true
