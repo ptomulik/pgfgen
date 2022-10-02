@@ -746,7 +746,7 @@ class GraphicObjectOptionsGenerator(GraphicObjectNodeWrapper):
         if isinstance(color, Color):
             if color.value is not None:
                 cvar = f"{option}color"
-                chex = color.hex[1:]  # remove leading '#'
+                chex = color.hexrgb[1:]  # remove leading '#'
                 lines.append(r"\definecolor{%s}{HTML}{%s}" % (cvar, chex))
                 lines.append(r"\pgfset%scolor{%s}" % (option, cvar))
             if color.opacity is not None:
