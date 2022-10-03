@@ -763,7 +763,7 @@ class GraphicObjectOptionsGenerator(GraphicObjectNodeWrapper):
             r"\pgf@process{\pgfpointxy{%r}{%r}}" % (e, e),
             r"\pgfmathparse{veclen(scalar(\the\pgf@x), scalar(\the\pgf@y))}",
             r"\pgfmathsetlength\pgf@xa{\pgfmathresult} % scale factor",
-            r"\pgfsetlinewidth{%r\pgf@xa}" % w,
+            r"\pgfsetlinewidth{%r*\pgf@xa}" % w,
         ]
 
     def generate_stroke_dash(self) -> list[str]:
@@ -779,7 +779,7 @@ class GraphicObjectOptionsGenerator(GraphicObjectNodeWrapper):
         scale = self._svg2pgf_scale()
         dashoffset = scale * dashoffset
         dasharray = [scale * x for x in dasharray]
-        dasharray_str = "".join([(r"{%r\pgf@xa}" % x) for x in dasharray])
+        dasharray_str = "".join([(r"{%r*\pgf@xa}" % x) for x in dasharray])
 
         e = 1.0 / sqrt(2.0)
 
@@ -787,7 +787,7 @@ class GraphicObjectOptionsGenerator(GraphicObjectNodeWrapper):
             r"\pgf@process{\pgfpointxy{%r}{%r}}" % (e, e),
             r"\pgfmathparse{veclen(scalar(\the\pgf@x), scalar(\the\pgf@y))}",
             r"\pgfmathsetlength\pgf@xa{\pgfmathresult} % scale factor",
-            r"\pgfsetdash{%s}{%r\pgf@xa}" % (dasharray_str, dashoffset),
+            r"\pgfsetdash{%s}{%r*\pgf@xa}" % (dasharray_str, dashoffset),
         ]
 
     def generate_stroke_linejoin(self) -> list[str]:
