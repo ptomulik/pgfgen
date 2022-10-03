@@ -772,7 +772,7 @@ class GraphicObjectOptionsGenerator(GraphicObjectNodeWrapper):
         dasharray = self.implicit_stroke_dasharray
         dashoffset: float = self.implicit_stroke_dashoffset or 0.0
         if dasharray is None:
-            return [r"% dasharray is None!"]
+            return []
         if dasharray == "none":
             return [r"\pgfsetdash{}{0pt}"]
 
